@@ -142,7 +142,16 @@ namespace MediaBrowser.Channels.ABCiView.iView
             ConfigInfo config,
             BaseSeries series)
         {
-            string seriesUrl = config.ApiUrl + "series=" + series.a;
+            return await GetSeriesDetail(httpClient, jsonSerializer, logger, cancellationToken, config, series.a);
+        }
+        internal static async Task<List<Series>> GetSeriesDetail(IHttpClient httpClient,
+            IJsonSerializer jsonSerializer,
+            ILogger logger,
+            CancellationToken cancellationToken,
+            ConfigInfo config,
+            string seriesId)
+        {
+            string seriesUrl = config.ApiUrl + "series=" + seriesId;
             using (var stream = await MakeHttpRequest(httpClient, logger, cancellationToken, seriesUrl).ConfigureAwait(false))
             {
                 return GetSeriesDetail(jsonSerializer, stream);

@@ -17,7 +17,7 @@ using System.Threading.Tasks;
 
 namespace MediaBrowser.Channels.ABCiView
 {
-    class Channel : IChannel, IHasCacheKey //, IRequiresMediaInfoCallback
+    class Channel : IChannel, IHasCacheKey, IRequiresMediaInfoCallback
     {
         private readonly IHttpClient _httpClient;
         private readonly ILogger _logger;
@@ -80,7 +80,7 @@ namespace MediaBrowser.Channels.ABCiView
                     if (seriesIndex != null)
                     {
                         var matchingSeries = await iView.Downloader.GetSeriesDetail(this._httpClient, this._jsonSerializer, this._logger, cancellationToken, config, seriesIndex);
-                        items.AddRange(GetChannelItemInfo(config, matchingSeries));
+                        items.AddRange(GetChannelItemInfo(matchingSeries, config));
                     }
                     else
                     {
@@ -120,7 +120,11 @@ namespace MediaBrowser.Channels.ABCiView
             };
         }
 
-        private IEnumerable<ChannelItemInfo> GetChannelItemInfo(IEnumerable<iViewEntities.Category> items)
+        private IEnumerable<ChannelItemInfo> GetChildrenChannelItemInfo(iViewEntities.Category item)
+        {
+            return GetChannelItemInfo(item.Categories);
+        }
+        private IEnumerable<ChannelItemInfo> GetChannelItemInfo( IEnumerable<iViewEntities.Category> items)
         {
             return items.Select(i => GetChannelItemInfo(i));
         }
@@ -147,13 +151,13 @@ namespace MediaBrowser.Channels.ABCiView
                 Type = ChannelItemType.Folder
             };
         }
-        private IEnumerable<ChannelItemInfo> GetChannelItemInfo(iViewEntities.ConfigInfo config, IEnumerable<iViewEntities.Series> items)
+        private IEnumerable<ChannelItemInfo> GetChannelItemInfo(IEnumerable<iViewEntities.Series> items, iViewEntities.ConfigInfo config)
         {
-            return items.SelectMany(i => GetChannelItemInfo(config, i));
+            return items.SelectMany(i => GetChannelItemInfo(i, config));
         }
-        private IEnumerable<ChannelItemInfo> GetChannelItemInfo(iViewEntities.ConfigInfo config, iViewEntities.Series item)
+        private IEnumerable<ChannelItemInfo> GetChannelItemInfo(iViewEntities.Series item, iViewEntities.ConfigInfo config)
         {
-            return item.f.Select(i => GetChannelItemInfo(config, i));
+            return item.f.Select(i => GetChannelItemInfo(item, i, config));
             //return new ChannelItemInfo()
             //{
             //    Id = item.a,
@@ -163,15 +167,15 @@ namespace MediaBrowser.Channels.ABCiView
             //    Type = ChannelItemType.Folder
             //};
         }
-        private IEnumerable<ChannelItemInfo> GetChannelItemInfo(iViewEntities.ConfigInfo config, IEnumerable<iViewEntities.Program> items)
+        private IEnumerable<ChannelItemInfo> GetChannelItemInfo(iViewEntities.Series parent, IEnumerable<iViewEntities.Program> items, iViewEntities.ConfigInfo config)
         {
-            return items.Select(i => GetChannelItemInfo(config, i));
+            return items.Select(i => GetChannelItemInfo(parent, i, config));
         }
-        private ChannelItemInfo GetChannelItemInfo(iViewEntities.ConfigInfo config, iViewEntities.Program item)
+        private ChannelItemInfo GetChannelItemInfo(iViewEntities.Series parent, iViewEntities.Program item, iViewEntities.ConfigInfo config)
         {
             return new ChannelItemInfo()
             {
-                Id = item.a,
+                Id = item.GetFolderId(parent),
                 Name = item.b,
                 Overview = item.d,
                 Tags = (item.e == null) ? null : item.e.Split(' ').ToList(),
@@ -180,8 +184,8 @@ namespace MediaBrowser.Channels.ABCiView
                 ImageUrl = item.s,
                 IsInfiniteStream = (!string.IsNullOrWhiteSpace(item.t) && (item.t =="1")),
                 Type = ChannelItemType.Media,
-                MediaType = ChannelMediaType.Video,
-                MediaSources = GetChannelMediaInfo(config, item)
+                MediaType = ChannelMediaType.Video
+                //MediaSources = GetChannelMediaInfo(config, item)
             };
         }
         private long? GetRuntimeTicksFromSeconds(string sec)
@@ -211,7 +215,8 @@ namespace MediaBrowser.Channels.ABCiView
             //fallback - probably unnecessary and will go unused
             baseUrl = config.ServerFallbackUrl.Replace("/ondemand", "////flash/playback/_definst_");
             mainUrl = Uri.EscapeUriString(string.Format("{0}/{1}", baseUrl, item.n));
-            cmdParams = string.Format("{0}/{1}{2}", config.ServerFallbackUrl, item.f, item.n, "http://www.abc.net.au/iview/images/iview.jpg");
+            auth = iView.Downloader.GetAuthToken(this._httpClient, this._jsonSerializer, this._logger, CancellationToken.None, config).Result;
+            cmdParams = string.Format("{0} tcUrl={1}?auth={2} swfUrl={3} swfVfy=1 ", mainUrl, config.ServerStreamngUrl, auth.Token, "http://www.abc.net.au/iview/images/iview.jpg");
             results.Add(new ChannelMediaInfo() { Path = cmdParams, Protocol = MediaProtocol.Rtmp });
             //***********************
 
@@ -243,14 +248,25 @@ namespace MediaBrowser.Channels.ABCiView
             return allSeriesIndexes.Where(i => i.e.Contains(category.id));
         }
 
-        //public async Task<IEnumerable<ChannelMediaInfo>> GetChannelItemMediaInfo(string id, CancellationToken cancellationToken)
-        //{
-        //    //we know it's a program id
-        
-        //    //TODO cache config instead of loading it each time
-        //    var config = await iView.Downloader.GetConfig(this._httpClient, this._logger, cancellationToken);
+        public async Task<IEnumerable<ChannelMediaInfo>> GetChannelItemMediaInfo(string id, CancellationToken cancellationToken)
+        {
+            //we know it's a program id
 
-        //}
+            //id will look something like
+            //"Series_12345||Program_6789"
+            string[] delimeter = { "||" };
+            var s = id.Split(delimeter, StringSplitOptions.RemoveEmptyEntries );
+            var seriesId = s[0].Replace("Series_", "");
+            var programId = s[1].Replace("Program_", "");
+            //TODO cache config instead of loading it each time
+            var config = await iView.Downloader.GetConfig(this._httpClient, this._logger, cancellationToken);
+
+            var series = await iView.Downloader.GetSeriesDetail(this._httpClient, this._jsonSerializer, this._logger, cancellationToken, config, seriesId);
+            var program = series.First().f.First(i => i.a == programId);
+
+            return GetChannelMediaInfo(config, program);
+        }
+
         public IEnumerable<ImageType> GetSupportedChannelImages()
         {
             return new List<ImageType>
@@ -334,6 +350,51 @@ namespace MediaBrowser.Channels.ABCiView
 
     public static class Extensions
     {
+        //public static string GetHierarchicalFolderId(this iViewEntities.Category item, string parentFolderId)
+        //{
+        //    return string.Format("{0}||{2}", parentFolderId, GetIndividualFolderId(item));
+        //}
+        //public static string GetIndividualFolderId(this iViewEntities.Category item)
+        //{
+        //    return string.Format("Category_{0}", item.id);
+        //}
+        //public static string GetHierarchicalFolderId(this iViewEntities.SeriesIndex item, string parentFolderId)
+        //{
+        //    return string.Format("{0}||{2}", parentFolderId, GetIndividualFolderId(item));
+        //}
+        //public static string GetIndividualFolderId(this iViewEntities.SeriesIndex item)
+        //{
+        //    return string.Format("SeriesIndex_{0}", item.a);
+        //}
+        //public static string GetHierarchicalFolderId(this iViewEntities.Series item, string parentFolderId)
+        //{
+        //    return string.Format("{0}||{2}", parentFolderId, GetIndividualFolderId(item));
+        //}
+        //public static string GetIndividualFolderId(this iViewEntities.Series item)
+        //{
+        //    return string.Format("Series_{0}", item.a);
+        //}
+        //public static string GetHierarchicalFolderId(this iViewEntities.ProgramIndex item, string parentFolderId)
+        //{
+        //    return string.Format("{0}||{2}", parentFolderId, GetIndividualFolderId(item));
+        //}
+        //public static string GetIndividualFolderId(this iViewEntities.ProgramIndex item)
+        //{
+        //    return string.Format("ProgramIndex_{0}", item.a);
+        //}
+        //public static string GetHierarchicalFolderId(this iViewEntities.Program item, string parentFolderId)
+        //{
+        //    return string.Format("{0}||{2}", parentFolderId, GetIndividualFolderId(item));
+        //}
+        //public static string GetIndividualFolderId(this iViewEntities.Program item)
+        //{
+        //    return string.Format("Program_{0}", item.a);
+        //}
+        public static string GetFolderId(this iViewEntities.Program item, iViewEntities.Series parent)
+        {
+            return string.Format("Series_{0}||Program_{1}", parent.a, item.a);
+        }
+
         public static iViewEntities.Category FirstOrDefaultDecenant(this IEnumerable<iViewEntities.Category> items, Func<iViewEntities.Category, bool> predicate)
         {
             return items.FirstOrDefaultDecenant(i => i.Categories, predicate);
