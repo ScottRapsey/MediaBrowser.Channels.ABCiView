@@ -17,7 +17,7 @@ using System.Threading.Tasks;
 
 namespace MediaBrowser.Channels.ABCiView
 {
-    class Channel : IChannel, IHasCacheKey, IRequiresMediaInfoCallback
+    class Channel : IChannel, IHasCacheKey //, IRequiresMediaInfoCallback
     {
         private readonly IHttpClient _httpClient;
         private readonly ILogger _logger;
@@ -243,14 +243,14 @@ namespace MediaBrowser.Channels.ABCiView
             return allSeriesIndexes.Where(i => i.e.Contains(category.id));
         }
 
-        public async Task<IEnumerable<ChannelMediaInfo>> GetChannelItemMediaInfo(string id, CancellationToken cancellationToken)
-        {
-            //we know it's a program id
+        //public async Task<IEnumerable<ChannelMediaInfo>> GetChannelItemMediaInfo(string id, CancellationToken cancellationToken)
+        //{
+        //    //we know it's a program id
         
-            //TODO cache config instead of loading it each time
-            var config = await iView.Downloader.GetConfig(this._httpClient, this._logger, cancellationToken);
+        //    //TODO cache config instead of loading it each time
+        //    var config = await iView.Downloader.GetConfig(this._httpClient, this._logger, cancellationToken);
 
-        }
+        //}
         public IEnumerable<ImageType> GetSupportedChannelImages()
         {
             return new List<ImageType>
