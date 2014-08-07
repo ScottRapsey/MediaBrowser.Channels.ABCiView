@@ -37,5 +37,5 @@ Icon
 .Trashes
 
 # Nuget Packages
-packages/*
-!packages/repositories.config
+# packages/*
+# !packages/repositories.config
